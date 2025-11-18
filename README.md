@@ -49,11 +49,13 @@ The flow returns the recommendations directly to the same URL where the user sub
 
 **Repository Content:**
 
-1. Python ingestion script (data_ingest.py):
-- Fetches movie information from TMDB
-- Normalizes and cleans the data
-- Inserts all films and metadata into a MySQL database
-- Produces the lists of actors, genres, languages, etc., used later for GPT-4 keyword matching
+1. Python ingestion script (movie_ingestion.py):
+- Fetches movie data from TMDB across multiple years and pages based on popularity
+- Retrieves detailed metadata for each film, including credits, directors, and top-billed actors
+- Normalizes, cleans, and structures the data (genres, languages, lists, text fields, etc.)
+- Handles rate limits and implements retry logic for resilient API and database operations
+- Inserts all processed movie records into a MySQL database for downstream analytics
+- Produces reusable structures (actors, directors, genres, languages) that can support LLM keyword matching or recommendation pipelines.
 
 2. n8n_flow
 
