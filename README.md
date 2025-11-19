@@ -63,6 +63,7 @@ The flow returns the recommendations directly to the same URL where the user sub
 
 3. JSON file with n8n flow (n8n_flow.json):
 - JSON file with n8n code without credentials or webhookID (must be modified in order to work)
+- The flow structure can be viewed in the n8n_flow_view.png file
 
 **Technologies Used**
 1. n8n – Orchestration and workflow automation
