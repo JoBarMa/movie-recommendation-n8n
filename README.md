@@ -57,7 +57,9 @@ The flow returns the recommendations directly to the same URL where the user sub
 - Inserts all processed movie records into a MySQL database for downstream analytics
 - Produces reusable structures (actors, directors, genres, languages) that can support LLM keyword matching or recommendation pipelines.
 
-2. n8n_flow
+2. SQL transformation queries (sql_transformations.sql):
+- Query for creating a table with unique actors from the main table
+- Query for adding SOUNDEX columns to be used in fuzzy matching
 
 **Technologies Used**
 1. n8n – Orchestration and workflow automation
