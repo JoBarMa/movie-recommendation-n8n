@@ -1,0 +1,1764 @@
+{
+  "name": "My workflow - custom",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json['What movie are you looking for?']\nreturn {\n  cleanedInput: input.toLowerCase().replace(/[^a-z0-9\\s]/gi, ''),\n  rawInput: $input.first().json['What movie are you looking for?']\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1300,
+        877.5
+      ],
+      "id": "609994f8-1346-433e-b585-1bd1dff7325d",
+      "name": "normalize_user_input"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        -690
+      ],
+      "id": "54abb34a-13a6-4242-9aa2-0168dbde622f",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"genres\": [\n    {\n      \"value\": \"Science Fiction\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"Drama\",\n      \"weight\": 2\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        -885
+      ],
+      "id": "66ee85ab-48e8-4a42-a2ba-7fbfb8c11772",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "set @json_exclusions ='{{ JSON.stringify({ rejected_ids: $json.rejected_ids  }) }}';\nSET @actors_json = '{{ JSON.stringify({ main_actors: $json.main_actors }) }}';\nSET @directors_json = '{{ JSON.stringify({ directors: $json.directors }) }}';\nSET @genres_json = '{{ JSON.stringify({ genres: $json.genres }) }}';\nSET @title_json = '{{ JSON.stringify({ title_keywords: $json.title_keywords }) }}';\nSET @overview_json = '{{ JSON.stringify({ overview_keywords: $json.overview_keywords }) }}';\nSET @lenguage_json = '{{ JSON.stringify({ original_language: $json.original_language }) }}';\nSET @runtime_json = '{{ JSON.stringify({ runtime_range: $json.runtime_range }) }}';\nSET @year_json = '{{ JSON.stringify({ year_range: $json.year_range }) }}';\n\n\nSET SESSION group_concat_max_len = 1000000;\n\n  \nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(actor.value, '$.weight'),\n    ' * CASE WHEN main_actors_soundex LIKE \"%',\n    SOUNDEX(JSON_UNQUOTE(JSON_EXTRACT(actor.value, '$.value'))),\n    '%\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @actor_score_expr\nFROM JSON_TABLE(@actors_json, '$.main_actors[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS actor;\nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(director.value, '$.weight'),\n    ' * CASE WHEN directors_soundex LIKE \"%',\n    SOUNDEX(JSON_UNQUOTE(JSON_EXTRACT(director.value, '$.value'))),\n    '%\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @director_score_expr\nFROM JSON_TABLE(@directors_json, '$.directors[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS director;\nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(genre.value, '$.weight'),\n    ' * CASE WHEN genres LIKE \"%',\n    JSON_UNQUOTE(JSON_EXTRACT(genre.value, '$.value')),\n    '%\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @genre_score_expr\nFROM JSON_TABLE(@genres_json, '$.genres[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS genre;\nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(t.value, '$.weight'),\n    ' * CASE WHEN title_soundex LIKE \"%',\n    SOUNDEX(JSON_UNQUOTE(JSON_EXTRACT(t.value, '$.value'))),\n    '%\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @title_score_expr\nFROM JSON_TABLE(@title_json, '$.title_keywords[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS t;\nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(k.value, '$.weight'),\n    ' * CASE WHEN overview LIKE \"%',\n    JSON_UNQUOTE(JSON_EXTRACT(k.value, '$.value')),\n    '%\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @overview_score_expr\nFROM JSON_TABLE(@overview_json, '$.overview_keywords[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS k;\nSELECT GROUP_CONCAT(\n  CONCAT(\n    JSON_EXTRACT(lang.value, '$.weight'),\n    ' * CASE WHEN original_language = \"',\n    JSON_UNQUOTE(JSON_EXTRACT(lang.value, '$.value')),\n    '\" THEN 1 ELSE 0 END'\n  ) SEPARATOR ' + '\n) INTO @language_score_expr\nFROM JSON_TABLE(@lenguage_json, '$.original_language[*]'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS lang;\nSELECT CONCAT(\n  'CASE ',\n  'WHEN runtime >= ', JSON_EXTRACT(j.value, '$.value[0]'),\n  ' AND runtime <= ', JSON_EXTRACT(j.value, '$.value[1]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'),\n  ' WHEN runtime < ', JSON_EXTRACT(j.value, '$.value[0]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'), '/(1 + LN(1 + ABS(', JSON_EXTRACT(j.value, '$.value[0]'), ' - runtime)))',\n  ' WHEN runtime > ', JSON_EXTRACT(j.value, '$.value[1]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'), '/(1 + LN(1 + ABS(', JSON_EXTRACT(j.value, '$.value[1]'), ' - runtime)))',\n  ' END'\n) INTO @runtime_score_expr\nFROM JSON_TABLE(@runtime_json, '$.runtime_range'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS j;\nSELECT CONCAT(\n  'CASE ',\n  'WHEN year >= ', JSON_EXTRACT(j.value, '$.value[0]'),\n  ' AND year <= ', JSON_EXTRACT(j.value, '$.value[1]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'),\n  ' WHEN year < ', JSON_EXTRACT(j.value, '$.value[0]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'), '/(1 + LN(1 + ABS(', JSON_EXTRACT(j.value, '$.value[0]'), ' - year)))',\n  ' WHEN year > ', JSON_EXTRACT(j.value, '$.value[1]'),\n  ' THEN ', JSON_EXTRACT(j.value, '$.weight'), '/(1 + LN(1 + ABS(', JSON_EXTRACT(j.value, '$.value[1]'), ' - year)))',\n  ' END'\n) INTO @year_score_expr\nFROM JSON_TABLE(@year_json, '$.year_range'\n  COLUMNS (\n    value JSON PATH '$'\n  )\n) AS j;\n\n\n\nSET @sql = CONCAT(\n'WITH rejected AS (\n    SELECT id\n    FROM JSON_TABLE(', QUOTE(@json_exclusions), ', \"$.rejected_ids[*]\"\n      COLUMNS (id INT PATH \"$\")\n    ) AS rej\n),\nmovies_with_score AS (\n    SELECT\n      title,\n      ', IFNULL(@actor_score_expr, '0'), ' +\n      ', IFNULL(@director_score_expr, '0'), ' +\n      ', IFNULL(@genre_score_expr, '0'), ' +\n      ', IFNULL(@title_score_expr, '0'), ' +\n      ', IFNULL(@overview_score_expr, '0'), ' +\n      ', IFNULL(@language_score_expr, '0'), ' +\n      ', IFNULL(@runtime_score_expr, '0'), ' +\n      ', IFNULL(@year_score_expr, '0'), '\n      AS score\n    FROM tmdb_movies\n    WHERE id NOT IN (SELECT id FROM rejected)\n),\nranked_movies AS (\n    SELECT *,\n           DENSE_RANK() OVER (ORDER BY score DESC) AS rank_col\n    FROM movies_with_score\n)\nSELECT title, score\nFROM ranked_movies\nORDER BY rank_col ASC\nlimit 5'\n);\n\nPREPARE stmt FROM @sql;\nEXECUTE stmt;\nDEALLOCATE PREPARE stmt;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        1770
+      ],
+      "id": "444bc0f2-91b7-49cf-91f6-ac0561b2233c",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "mySql": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        -1285
+      ],
+      "id": "860468a1-4f62-4a7d-be5f-2d727ffa2e98",
+      "name": "OpenAI Chat Model2",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title_keywords\": [\n    {\n      \"value\": \"Toy Story\",\n      \"weight\": 7\n    },\n    {\n      \"value\": \"Interestelar\",\n      \"weight\": 7\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        -1480
+      ],
+      "id": "f7e2fbeb-38d4-4ff8-b2ac-7682138e2a64",
+      "name": "Structured Output Parser2"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=If there isn't enought information, leave the field empty.\n\nYou are analyzing a user query for movie search. Your job is to determine if the user cares about the **genre** of the movie, and if so:\n\n1. Extract **genres** that the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important the genres are in their message\n\nGuidelines:\n- If the user names a specific genre, give it a high weight (8–10)\n- If the user references a vague genre (\"scary\", \"funny\"), assign a medium weight (4–7)\n- If the user mentions a genre but it doen't seem important to him, assign a low weight (1–3)\n- The allowed genres you can include in the output are:\nThriller, Horror, Drama, Comedy, Adventure, Action, Science Fiction, Romance, War, Crime, History, Music, Mystery, Family, Fantasy, Western, Animation, Documentary, TV Movie\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"genres\": [\n    {\n      \"value\": \"Science Fiction\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"Drama\",\n      \"weight\": 2\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        -1105
+      ],
+      "id": "79c199cf-6bbf-4700-a0db-cf4a473d4316",
+      "name": "Genres"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        1690
+      ],
+      "id": "1955e953-6c36-4223-9f63-316ac52091fd",
+      "name": "OpenAI Chat Model3",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"original_language\": [\n    {\n      \"value\": \"en\",\n      \"weight\": 6\n    },\n    {\n      \"value\": \"fr\",\n      \"weight\": 10\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        1495
+      ],
+      "id": "7942f600-ade2-43f8-904d-59f61c96a2c0",
+      "name": "Structured Output Parser3"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        -95
+      ],
+      "id": "a0cc422d-c92c-402b-ab04-b452a133b1d1",
+      "name": "OpenAI Chat Model4",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"overview_keywords\": [\n    {\n      \"value\": \"space\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"black hole\",\n      \"weight\": 5\n    },\n    {\n      \"value\": \"father-daughter\",\n      \"weight\": 10\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        -290
+      ],
+      "id": "a0dbe973-65b6-4143-ba6e-a6b73d8ca4cf",
+      "name": "Structured Output Parser4"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to find **key words** in the user mesage, and if so:\n\n1. Extract **key words** from the user's message\n2. Assign a **weight from 1 to 10** based on how important these keywords are in their message\n\nGuidelines:\n- If the key word seems really important, give it a high weight (5–10)\n- If the key word doesn't seem important to him, assign a low weight (1–5)\n- Extract a maximum of 5 keywords; the most important ones\n- Key words must be only one word\n- Key words can be genres or names of directors, actors or other movies\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"overview_keywords\": [\n    {\n      \"value\": \"space\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"black hole\",\n      \"weight\": 5\n    },\n    {\n      \"value\": \"father-daughter\",\n      \"weight\": 10\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        -510
+      ],
+      "id": "61f83a0e-1c1d-441b-97d4-9e6b83361696",
+      "name": "Keywords"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        500
+      ],
+      "id": "35ff85f2-a694-4999-b044-4ae8b39ac66f",
+      "name": "OpenAI Chat Model5",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"year_range\": {\n    \"value\": [\n      2000,\n      2015\n    ],\n    \"weight\": 4\n  }\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        305
+      ],
+      "id": "d7d98a27-0c15-4b84-9eaf-a7ab1daaeb21",
+      "name": "Structured Output Parser5"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to determine if the user cares about the **year** where the movie was released, and if so:\n\n1. Extract **year range** where the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important the year range is in their message\n\nGuidelines:\n- If the user names a specific year or year range, give it a high weight (8–10)\n- If the user references a vague period of time (\"modern\", \"old\"), assign a medium weight (4–7)\n- If the user mentions the period it was released but it doen't seem important to him, assign a low weight (1–3)\n\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"year_range\": {\n    \"value\": [\n      2000,\n      2015\n    ],\n    \"weight\": 4\n  }\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        85
+      ],
+      "id": "bd3025d6-70ac-4614-871f-cb838737c7f4",
+      "name": "Year range"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        1095
+      ],
+      "id": "612c8769-45a9-4d2f-a474-5bae100e2594",
+      "name": "OpenAI Chat Model6",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"runtime_range\": {\n    \"value\": [\n      60,\n      90\n    ],\n    \"weight\": 10\n  }\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        900
+      ],
+      "id": "2d13f498-0a90-4b81-b8e2-0a1093eb3a5c",
+      "name": "Structured Output Parser6"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to determine if the user cares about the **lenght** of the movie (also called **runtime**), and if so:\n\n1. Extract **run time range** that the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important the year range is in their message\n\nGuidelines:\n- If the user names a specific run time or run time range, give it a high weight (8–10)\n- If the user references a vague run time (\"long\", \"short\"), assign a medium weight (4–7)\n- If he mentions the run time but it doesn't seem important to him, assign a low weight (1–3)\n- Take as a reference that a normal movie would have a range of [90, 120]\n- If the user doesn't specify that the movie must be really short, the botom range must be at least 60\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"runtime_range\": {\n    \"value\": [\n      60,\n      90\n    ],\n    \"weight\": 10\n  }\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        680
+      ],
+      "id": "eb3a5954-116c-4fa1-8e30-8ef33bf9f605",
+      "name": "Runtime"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        2285
+      ],
+      "id": "5213c399-0980-43c7-a43d-5e981ae27877",
+      "name": "OpenAI Chat Model7",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"main_actors\": [\n    {\n      \"value\": \"Matthew McConaughey\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"Anne Hathaway\",\n      \"weight\": 4\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        2090
+      ],
+      "id": "ae94cedf-7f9c-4be3-a458-f407c8ef9c52",
+      "name": "Structured Output Parser7"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to determine if the user cares about the **actors** that appear in the movie, and if so:\n\n1. Extract **actors** the the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important these actors are in their message\n\nGuidelines:\n- If the user names a specific actor, give it a high weight (5–10)\n- If the user mentions an actor but it doen't seem important to him, assign a low weight (1–3)\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"main_actors\": [\n    {\n      \"value\": \"Matthew McConaughey\",\n      \"weight\": 3\n    },\n    {\n      \"value\": \"Anne Hathaway\",\n      \"weight\": 4\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        1870
+      ],
+      "id": "ffb5af7a-0f13-4032-9653-1b694f819c4c",
+      "name": "Actors"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        2880
+      ],
+      "id": "73d76b90-9dcd-4a80-bd9d-abcb50d03f72",
+      "name": "OpenAI Chat Model8",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"directors\": [\n    {\n      \"value\": \"Christopher Nolan\",\n      \"weight\": 3\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        2685
+      ],
+      "id": "7ab7440b-9d1c-4773-83fc-773026c37949",
+      "name": "Structured Output Parser8"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to determine if the user cares about the **director** of the movie, and if so:\n\n1. Extract the **director** that the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important the director is in their message\n\nGuidelines:\n- If the user names a specific director, give it a high weight (5–10)\n- If the user mentions the director but it doen't seem important to him, assign a low weight (1–4)\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"directors\": [\n    {\n      \"value\": \"Christopher Nolan\",\n      \"weight\": 3\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        2465
+      ],
+      "id": "8ef0208a-7e51-4c03-8220-8f70fd4e18cb",
+      "name": "Directors"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to determine if the user cares about the **original language** of the movie, and if so:\n\n1. Extract the **original** that the user refers to or implies\n2. Assign a **weight from 1 to 10** based on how important the original language is in their message\n\nGuidelines:\n- If the user names a specific original language, give it a high weight (8–10)\n- If the user references a characteristic of the movie that can be associated to a language (\"asiatic\", \"hollywood\"), assign a medium weight (4–7)\n- If the user mentions the original language but it doen't seem important to him, assign a low weight (1–3)\n- The languages must be within the **codes** from the following list (the ones between parentheses):\nEnglish (en), Italian (it), Spanish (es), Japanese (ja), French (fr), Chinese (zh), Greek (el), Chinese (Simplified) (cn), Russian (ru), German (de), Portuguese (pt), Telugu (te), Hindi (hi), Polish (pl), Hebrew (he), Serbo-Croatian (sh), Dutch (nl), Korean (ko), Swedish (sv), Turkish (tr), Danish (da), Tagalog (tl), Persian/Farsi (fa), Arabic (ar), Zulu (zu), Marathi (mr), Czech (cs), Indonesian (id), Finnish (fi), Latvian (lv), Bengali (bn), Odia (or), Tamil (ta), Malayalam (ml), Hungarian (hu), Serbian (sr), Norwegian (no), Thai (th), Kannada (kn), Lithuanian (lt), Javanese (jv), Ukrainian (uk), Hiri Motu (ho), Kikuyu (ki), Unknown or artificial (xx), Afrikaans (af), Mongolian (mn)\n- In the output, include only these codes; don't include the full name of original languages\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"original_language\": [\n    {\n      \"value\": \"en\",\n      \"weight\": 6\n    },\n    {\n      \"value\": \"fr\",\n      \"weight\": 10\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        1275
+      ],
+      "id": "aaad22c6-1726-4058-b6d0-2dd74f861b0e",
+      "name": "Language"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -907.5
+      ],
+      "id": "6b87ec10-e0af-4fc2-a879-c6d0d046a5e5",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        1472.5
+      ],
+      "id": "5b1ba712-605e-49a3-8b5a-78750232c728",
+      "name": "Code1"
+    },
+    {
+      "parameters": {
+        "numberInputs": 8
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        240,
+        480
+      ],
+      "id": "0d70a16f-31f3-495c-bc65-27b2d628bcc7",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -312.5
+      ],
+      "id": "80884e93-492e-4611-9830-fed353e02adb",
+      "name": "Code3"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        282.5
+      ],
+      "id": "503cc001-e328-47b3-a7bd-49163a9027db",
+      "name": "Code4"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        877.5
+      ],
+      "id": "b528631d-4221-43d2-83ac-2a60962179cf",
+      "name": "Code5"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        2067.5
+      ],
+      "id": "b495aebe-c2bc-4380-acd7-3882fe06b2f2",
+      "name": "Code6"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        2662.5
+      ],
+      "id": "bccad88f-cbcd-4054-a741-f5733e74cb18",
+      "name": "Code7"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        -1502.5
+      ],
+      "id": "61b3ca7c-505e-49fd-b3cc-6a681bf06091",
+      "name": "Code8"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.output.title_keywords }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "a11682fb-34f1-486b-83bf-d43853e8fb56"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "title"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "3b7ec878-30fb-413d-bba0-a94f196ccc44",
+                    "leftValue": "={{ $json.output.genres }}",
+                    "rightValue": "true",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "genres"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6207e214-f927-4371-9dbe-3dbf4bd0a523",
+                    "leftValue": "={{ $json.output.overview_keywords }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "overview"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "75090c2f-451e-4986-b5c5-32210996f24f",
+                    "leftValue": "={{ $json.output.year_range}}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "year"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "b49d6e37-bfde-4dfb-bb06-e03c91b10317",
+                    "leftValue": "={{ $json.output.runtime_range }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "runtime"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8539bf87-0f68-4bd4-bb16-148e44d18d69",
+                    "leftValue": "={{ $json.output.original_language }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "original_language"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "f24c9e0a-4087-4758-82c1-d2d8340fd3d2",
+                    "leftValue": "={{ $json.output.main_actors }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "main_actors"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "8b58eaaa-5547-4cde-a6dd-8332d66ee943",
+                    "leftValue": "={{ $json.output.director }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "director"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "a9220319-58e6-4923-aa7a-6b2248342676",
+                    "leftValue": "={{ $json.output.reference_movie }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reference"
+            }
+          ]
+        },
+        "options": {
+          "allMatchingOutputs": true
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        -640,
+        757.5
+      ],
+      "id": "609bab12-4090-4ca0-8769-919cd64c002f",
+      "name": "Switch",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an intelligent assistant that analyzes natural language movie search requests.\n\nYour task is to detect which structured movie fields are semantically relevant or implied in the user's input.\n\nReturn a JSON object with the following fields. For each field, return `true` if the user clearly mentions or implies that it matters to their request. Return `false` otherwise.\n\nRespond ONLY with a valid JSON object. Do not include explanations or comments.\n\nList of fields:\n\n- referece_movie: if the user references another movie title as ane example of what he wants\n- title_keywords — if the user gives an aproximation of what the title may be or if he gives specific or descriptive words the user wants in the title\n- genres — genres like Horror, Comedy, Action, Romance\n- overview_keywords — thematic or content-related words like “robots”, “cars”, “space”, etc.\n- year_range — references to specific eras (e.g. “80s”, “before 2000”, “recent”)\n- runtime_range — mentions of movie length (e.g. “short”, “around 2 hours”, “not too long”)\n- original_language — any mention of language preference (e.g. “French movie”, “not dubbed”) or regions that could be assigned to a lenguage (e.g. \"Asiatic\" could be assigned to Japanese or Chinese)\n- main_actors — specific actors or actresses mentioned\n- director — any director or filmmaker mentioned\n\nExample output:\n```json\n{\n  \"reference_movie\": true,\n  \"title_keywords\": false,\n  \"genres\": true,\n  \"overview_keywords\": true,\n  \"year_range\": false,\n  \"runtime_range\": true,\n  \"original_language\": false,\n  \"main_actors\": false,\n  \"director\": false\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -1080,
+        877.5
+      ],
+      "id": "9d050d78-1509-4d8e-a591-91e920feddc3",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -1000,
+        1292.5
+      ],
+      "id": "48a735c1-9ddf-4dbd-8ebd-ff9f4c370fb0",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"reference_movie\": true,\n  \"title_keywords\": false,\n  \"genres\": true,\n  \"overview_keywords\": true,\n  \"year_range\": false,\n  \"runtime_range\": true,\n  \"original_language\": false,\n  \"main_actors\": false,\n  \"director\": false\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -1000,
+        1097.5
+      ],
+      "id": "454f67c5-3d49-4998-9afc-4aff0c633453",
+      "name": "Structured Output Parser1"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to find **movie titles** that the user is actually looking to watch — not just referenced. Follow these steps carefully:\n\nStep 1: Ignore movie titles that are used as references, such as:\nTitles used in comparisons (e.g., \"like Interstellar\", \"similar to Titanic\")\nExamples or mentions not requested directly\n\nStep 2: From the remaining text, extract any movie titles the user is actually asking for:\n- If the user mentions a clear, **valid title**, extract it and assign a weight of 8–10\n- If the user mentions a title that is a close variant or typo of a **valid title**, assign a weight of 4–7\n- If the title is vaguely similar to a **valid title**, assign a weight of 1–3\n\nStep 3: Output only **valid titles** that are NOT used as references.\n\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"title_keywords\": [\n    {\n      \"value\": \"Toy Story\",\n      \"weight\": 7\n    },\n    {\n      \"value\": \"Interestelar\",\n      \"weight\": 7\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        -1700
+      ],
+      "id": "2e8cfe1d-1323-4cd9-9ccb-4e74016b8411",
+      "name": "Titles"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4.1-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4.1-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        -340,
+        3672.5
+      ],
+      "id": "1611bbd0-e4c7-4de2-8883-7608e228151c",
+      "name": "OpenAI Chat Model9",
+      "credentials": {
+        "openAiApi": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"title_ref\": [\n    {\n      \"value\": \"Toy Story\",\n      \"weight\": 7\n    },\n    {\n      \"value\": \"Interestelar\",\n      \"weight\": 7\n    }\n  ]\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        -340,
+        3477.5
+      ],
+      "id": "77222ac1-a03f-4396-8166-fffdff608cf0",
+      "name": "Structured Output Parser9"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are analyzing a user query for movie search. Your job is to find **movie titles** that the user is actually referencing - not movies that he is actually looking for. Follow these steps carefully:\n\nStep 1: Ignore movie titles that user is looking specifically for (e.g. \"A movie called Titanic\", \"I think it's name is Intraestellar\")\n\nStep 2: From the remaining text, extract any movie titles the user is referencing as an example (e.g. \"Similar to Interestellar\", \"Like Toy Story\")\n\nStep 3: Assign to these refrence movies a weight from 1 to 10, being 1 the case when the movie is not rellevant in the users message and 10 the case it is crucial\n\nStep 4: Return a JSON with this information and the following format\n\n---\n\n### Output must be ONLY a valid JSON object with this structure:\n\n```json\n{\n  \"title_ref\": [\n    {\n      \"value\": \"Toy Story\",\n      \"weight\": 7\n    },\n    {\n      \"value\": \"Interestelar\",\n      \"weight\": 7\n    }\n  ]\n}\n\nNow analyze the following user request:\n\"\"\"\n{{ $('normalize_user_input').item.json.cleanedInput }}\n\"\"\"",
+        "hasOutputParser": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -420,
+        3257.5
+      ],
+      "id": "50a38b45-208b-44cf-810c-fcab80c97695",
+      "name": "Directors1"
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  return {\n    json: item.json.output\n  };\n});\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        20,
+        3257.5
+      ],
+      "id": "dd3e0fe8-826c-4610-99b7-cd8a25a80ab1",
+      "name": "Code9"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        680,
+        1770
+      ],
+      "id": "9292944b-6ade-46a1-a65f-80e798a454a2",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const combined = Object.assign(\n  {},\n  ...items\n    .filter(item => item && item.json) // Ensure item and item.json exist\n    .map(item => item.json)\n);\n\n// Wrap inside \"FirstJSON\"\nreturn [{\n  json: {\n    FirstJSON: combined\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        580
+      ],
+      "id": "d60fd9df-ecb0-4a58-8101-784ab26d0c85",
+      "name": "FirstJSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Intentar acceder al primer item del nodo \"FirstJSON\"\nconst firstItems = $input.all('FirstJSON') || [];\nconst firstJson = firstItems[0]?.json?.FirstJSON || {};\n\n// Intentar acceder al primer item del nodo \"SecondJSON\"\nconst secondItems = $input.all('SecondJSON') || [];\nconst secondJson = secondItems[0]?.json?.SecondJSON || {};\n\n\n// Merge year_range\nlet year_range = null;\n\nif (firstJson.year_range && secondJson.year_range) {\n  const avgLower = Math.round(\n    (firstJson.year_range.value[0] + secondJson.year_range.value[0]) / 2\n  );\n  const avgUpper = Math.round(\n    (firstJson.year_range.value[1] + secondJson.year_range.value[1]) / 2\n  );\n  const avgWeight = Math.round(\n    (firstJson.year_range.weight + secondJson.year_range.weight) / 2\n  );\n\n  year_range = {\n    value: [avgLower, avgUpper],\n    weight: avgWeight\n  };\n} else if (firstJson.year_range) {\n  year_range = firstJson.year_range;\n} else if (secondJson.year_range) {\n  year_range = secondJson.year_range;\n} else {\n  year_range = { value: [], weight: 0 };\n}\n\n// Merge runtime_range with average bounds logic\nlet runtime_range = null;\n\nif (firstJson.runtime_range && secondJson.runtime_range) {\n  const avgLower = Math.round(\n    (firstJson.runtime_range.value[0] + secondJson.runtime_range.value[0]) / 2\n  );\n  const avgUpper = Math.round(\n    (firstJson.runtime_range.value[1] + secondJson.runtime_range.value[1]) / 2\n  );\n  const avgWeight = Math.round(\n    (firstJson.runtime_range.weight + secondJson.runtime_range.weight) / 2\n  );\n\n  runtime_range = {\n    value: [avgLower, avgUpper],\n    weight: avgWeight\n  };\n} else if (firstJson.runtime_range) {\n  runtime_range = firstJson.runtime_range;\n} else if (secondJson.runtime_range) {\n  runtime_range = secondJson.runtime_range;\n} else {\n  runtime_range = { value: [], weight: 0 };\n}\n\n// Merge genres from both JSONs with average weights for duplicates\nfunction mergeWeightedArrays(arr1 = [], arr2 = []) {\n  const map = new Map();\n\n  // Helper to add or update map entries\n  function addOrUpdate(item) {\n    if (!item?.value) return;\n    if (map.has(item.value)) {\n      const existing = map.get(item.value);\n      existing.weight = Math.round((existing.weight + item.weight) / 2);\n    } else {\n      map.set(item.value, { ...item });\n    }\n  }\n\n  arr1.forEach(addOrUpdate);\n  arr2.forEach(addOrUpdate);\n\n  return Array.from(map.values());\n}\n\nconst genres = mergeWeightedArrays(\n  firstJson.genres || [],\n  secondJson.genres || []\n);\nconst original_language = mergeWeightedArrays(\n  firstJson.original_language || [], \n  secondJson.original_language || []\n);\nconst main_actors = mergeWeightedArrays(\n  firstJson.main_actors || [], \n  secondJson.main_actors || []\n);\nconst directors = mergeWeightedArrays(\n  firstJson.directors || [], \n  secondJson.directors || []\n);\n\n\n// Build final JSON\nconst finalJson = {\n  title_keywords: firstJson.title_keywords || [],\n  overview_keywords: firstJson.overview_keywords || [],\n  rejected_ids: secondJson.rejected_ids || [],\n  year_range,\n  runtime_range,\n  genres,\n  original_language,\n  main_actors,\n  directors\n};\n\nreturn [{ json: finalJson }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        1770
+      ],
+      "id": "adb00502-c64b-4e23-bb1c-86f04d8b367f",
+      "name": "Code12"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Step 1: Store the JSON into a variable\nSET @my_json = '[{{ JSON.stringify({ title_ref: $json.title_ref }) }}]';\n\n-- Step 2: Create the temporary table\nDROP TEMPORARY TABLE IF EXISTS temp_titles;\nCREATE TEMPORARY TABLE temp_titles (\n    value  VARCHAR(255),\n    weight INT\n);\n\n-- Step 3: Extract and insert all values & weights\nINSERT INTO temp_titles (value, weight)\nSELECT\n    JSON_UNQUOTE(JSON_EXTRACT(jtr.title_ref_elem, '$.value')) AS value,\n    JSON_UNQUOTE(JSON_EXTRACT(jtr.title_ref_elem, '$.weight')) AS weight\nFROM JSON_TABLE(\n        @my_json,\n        '$[*]'\n        COLUMNS (\n            title_ref JSON PATH '$.title_ref'\n        )\n    ) AS jt\nCROSS JOIN JSON_TABLE(\n        jt.title_ref,\n        '$[*]'\n        COLUMNS (\n            title_ref_elem JSON PATH '$'\n        )\n    ) AS jtr;\n    \n-- Step 3: Create the second temporary table (matching_movies)\nDROP TEMPORARY TABLE IF EXISTS matching_movies;\nCREATE TEMPORARY TABLE matching_movies (\n    runtime INT,\n    original_language VARCHAR(10),\n    genres VARCHAR(255),\n    main_actors VARCHAR(255),\n    director VARCHAR(255),\n    year INT,\n    weight INT,\n    rejected_ids INT\n);\n\n-- Step 4: Insert matching movies with weight\nINSERT INTO matching_movies (runtime, original_language, genres, main_actors, director, year, weight, rejected_ids)\nSELECT \n    m.runtime,\n    m.original_language,\n    m.genres,\n    m.main_actors,\n    m.director,\n    m.year,\n    t.weight,\n    m.Id\nFROM temp_titles AS t\nJOIN tmdb_movies AS m\n    ON SOUNDEX(m.title) = SOUNDEX(t.value);\n\n-- Calculate average weight\nSET @avg_weight = (\n    SELECT ROUND(AVG(weight), 0) \n    FROM matching_movies\n);\n\n-- Get runtime range\nSELECT \n    MIN(runtime) AS runtime_min, \n    MAX(runtime) AS runtime_max\nINTO @runtime_min, @runtime_max\nFROM matching_movies;\n\n-- Get year range\nSELECT \n    MIN(year) AS year_min, \n    MAX(year) AS year_max\nINTO @year_min, @year_max\nFROM matching_movies;\n\n\nDROP TEMPORARY TABLE IF EXISTS unique_actors;\nCREATE TEMPORARY TABLE unique_actors (\n    actor_name VARCHAR(255) PRIMARY KEY\n);\n\nINSERT IGNORE INTO unique_actors (actor_name)\nSELECT DISTINCT TRIM(actor)\nFROM matching_movies\nJOIN JSON_TABLE(\n    CONCAT(\n        '[\"', \n        REPLACE(main_actors, ',', '\",\"'),\n        '\"]'\n    ),\n    '$[*]' COLUMNS (actor VARCHAR(255) PATH '$')\n) AS actors_list;\n\n\nDROP TEMPORARY TABLE IF EXISTS unique_languages;\nCREATE TEMPORARY TABLE unique_languages (\n    language_code VARCHAR(10) PRIMARY KEY\n);\n\nINSERT IGNORE INTO unique_languages (language_code)\nSELECT DISTINCT TRIM(lang)\nFROM matching_movies\nJOIN JSON_TABLE(\n    CONCAT(\n        '[\"', \n        REPLACE(REPLACE(original_language, ';', ','), ',', '\",\"'),\n        '\"]'\n    ),\n    '$[*]' COLUMNS (lang VARCHAR(10) PATH '$')\n) AS lang_list;\n\nDROP TEMPORARY TABLE IF EXISTS unique_genres;\nCREATE TEMPORARY TABLE unique_genres (\n    genre_name VARCHAR(100) PRIMARY KEY\n);\n\nINSERT IGNORE INTO unique_genres (genre_name)\nSELECT DISTINCT TRIM(genre)\nFROM matching_movies\nJOIN JSON_TABLE(\n    CONCAT(\n        '[\"', \n        REPLACE(REPLACE(genres, ';', ','), ',', '\",\"'),\n        '\"]'\n    ),\n    '$[*]' COLUMNS (genre VARCHAR(100) PATH '$')\n) AS genre_list;\n\nDROP TEMPORARY TABLE IF EXISTS unique_directors;\nCREATE TEMPORARY TABLE unique_directors (\n    director_name VARCHAR(255) PRIMARY KEY\n);\n\nINSERT IGNORE INTO unique_directors (director_name)\nSELECT DISTINCT TRIM(d.director_name)\nFROM matching_movies AS m\nJOIN JSON_TABLE(\n    CONCAT(\n        '[\"', \n        REPLACE(REPLACE(m.director, ';', ','), ',', '\",\"'),\n        '\"]'\n    ),\n    '$[*]' COLUMNS (director_name VARCHAR(255) PATH '$')\n) AS d;\n\nSELECT JSON_ARRAY(\n  JSON_OBJECT(\n    'title_keywords', JSON_ARRAY(),\n    'genres', (\n      SELECT JSON_ARRAYAGG(\n        JSON_OBJECT(\n          'value', genre_name,\n          'weight', @avg_weight\n        )\n      )\n      FROM unique_genres\n    ),\n    'year_range', JSON_OBJECT(\n      'value', JSON_ARRAY(@year_min, @year_max),\n      'weight', @avg_weight\n    ),\n    'runtime_range', JSON_OBJECT(\n      'value', JSON_ARRAY(@runtime_min, @runtime_max),\n      'weight', @avg_weight\n    ),\n    'original_language', (\n      SELECT JSON_ARRAYAGG(\n        JSON_OBJECT(\n          'value', language_code,\n          'weight', @avg_weight\n        )\n      )\n      FROM unique_languages\n    ),\n    'main_actors', (\n      SELECT JSON_ARRAYAGG(\n        JSON_OBJECT(\n          'value', actor_name,\n          'weight', @avg_weight\n        )\n      )\n      FROM unique_actors\n    ),\n    'directors', (\n      SELECT JSON_ARRAYAGG(\n        JSON_OBJECT(\n          'value', director_name,\n          'weight', @avg_weight\n        )\n      )\n      FROM unique_directors\n    ),\n    'rejected_ids', (\n      SELECT JSON_ARRAYAGG(rejected_ids)\n      FROM matching_movies\n    )\n  )\n) AS result_json;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        240,
+        3257.5
+      ],
+      "id": "a8472c9f-6eb3-4efa-ac84-7cb5efdab5c6",
+      "name": "SecondJSON SQL",
+      "credentials": {
+        "mySql": {
+          "id": "REDACTED",
+          "name": "REPLACE_ME"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{\n  json: {\n    SecondJSON: items[0].json.result_json\n      ? items[0].json.result_json[0]  // Take the first element of result_json\n      : items[0].json                 // Fallback if result_json doesn't exist\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        3257.5
+      ],
+      "id": "712a8afe-9f00-40c2-acc0-87c0692884ec",
+      "name": "SecondJSON"
+    },
+    {
+      "parameters": {
+        "formTitle": "Movie",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "What movie are you looking for?"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [
+        -1520,
+        880
+      ],
+      "id": "794e603f-17bd-4dc3-9ea1-709450cc45b4",
+      "name": "On form submission",
+      "webhookId": "REPLACE_ME"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Recommended movie:",
+        "completionMessage": "={{ $json.titlesString }}\n",
+        "options": {
+          "customCss": ":root {\n\t--font-family: 'Open Sans', sans-serif;\n\t--font-weight-normal: 400;\n\t--font-weight-bold: 600;\n\t--font-size-body: 12px;\n\t--font-size-label: 14px;\n\t--font-size-test-notice: 12px;\n\t--font-size-input: 14px;\n\t--font-size-header: 20px;\n\t--font-size-paragraph: 14px;\n\t--font-size-link: 12px;\n\t--font-size-error: 12px;\n\t--font-size-html-h1: 28px;\n\t--font-size-html-h2: 20px;\n\t--font-size-html-h3: 16px;\n\t--font-size-html-h4: 14px;\n\t--font-size-html-h5: 12px;\n\t--font-size-html-h6: 10px;\n\t--font-size-subheader: 14px;\n\n\t/* Colors */\n\t--color-background: #fbfcfe;\n\t--color-test-notice-text: #e6a23d;\n\t--color-test-notice-bg: #fefaf6;\n\t--color-test-notice-border: #f6dcb7;\n\t--color-card-bg: #ffffff;\n\t--color-card-border: #dbdfe7;\n\t--color-card-shadow: rgba(99, 77, 255, 0.06);\n\t--color-link: #7e8186;\n\t--color-header: #525356;\n\t--color-label: #555555;\n\t--color-input-border: #dbdfe7;\n\t--color-input-text: #71747A;\n\t--color-focus-border: rgb(90, 76, 194);\n\t--color-submit-btn-bg: #ff6d5a;\n\t--color-submit-btn-text: #ffffff;\n\t--color-error: #ea1f30;\n\t--color-required: #ff6d5a;\n\t--color-clear-button-bg: #7e8186;\n\t--color-html-text: #555;\n\t--color-html-link: #ff6d5a;\n\t--color-header-subtext: #7e8186;\n\n\t/* Border Radii */\n\t--border-radius-card: 8px;\n\t--border-radius-input: 6px;\n\t--border-radius-clear-btn: 50%;\n\t--card-border-radius: 8px;\n\n\t/* Spacing */\n\t--padding-container-top: 24px;\n\t--padding-card: 24px;\n\t--padding-test-notice-vertical: 12px;\n\t--padding-test-notice-horizontal: 24px;\n\t--margin-bottom-card: 16px;\n\t--padding-form-input: 12px;\n\t--card-padding: 24px;\n\t--card-margin-bottom: 16px;\n\n\t/* Dimensions */\n\t--container-width: 448px;\n\t--submit-btn-height: 48px;\n\t--checkbox-size: 18px;\n\n\t/* Others */\n\t--box-shadow-card: 0px 4px 16px 0px var(--color-card-shadow);\n\t--opacity-placeholder: 0.5;\n}\n\n<h2>Thanks for your submission!</h2>\n<p>Here are the movies you submitted:</p>\n<div>\n  {{ $json[\"movies\"].replace(/,\\s*/g, \"<br>\") }}\n</div>\n"
+        }
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [
+        1560,
+        1780
+      ],
+      "id": "fd2c05a0-9d3b-4bc2-8d79-1ac3bd5cf403",
+      "name": "Form",
+      "webhookId": "REPLACE_ME"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Recibe todos los items del nodo anterior\nconst results = $input.all();  \n\n// Extrae solo los títulos\nconst titles = results.map(item => item.json.title);\n\n// Devuelve en un solo objeto\nreturn [\n  {\n    json: {\n      allTitles: titles,                // como array\n      titlesString: titles.join(\", \")   // string con saltos de línea\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        1770
+      ],
+      "id": "79db7f8f-95ec-45d9-b0e2-b238fcc55bc6",
+      "name": "Title format"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "normalize_user_input": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Genres",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Genres",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser2",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Titles",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser2": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Titles",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Genres": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Language",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser3",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser3": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Language",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Keywords",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser4",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser4": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Keywords",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Year range",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser5",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser5": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Year range",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keywords": {
+      "main": [
+        [
+          {
+            "node": "Code3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model6": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Runtime",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser6",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser6": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Runtime",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Year range": {
+      "main": [
+        [
+          {
+            "node": "Code4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model7": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Actors",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser7",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser7": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Actors",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Runtime": {
+      "main": [
+        [
+          {
+            "node": "Code5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model8": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Directors",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser8",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser8": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Directors",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Actors": {
+      "main": [
+        [
+          {
+            "node": "Code6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Directors": {
+      "main": [
+        [
+          {
+            "node": "Code7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Language": {
+      "main": [
+        [
+          {
+            "node": "Code1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "FirstJSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code3": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Code4": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Code5": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Code6": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "Code7": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "Code8": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Titles",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Genres",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Keywords",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Year range",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Runtime",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Language",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Actors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Directors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Directors1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Titles": {
+      "main": [
+        [
+          {
+            "node": "Code8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model9": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Directors1",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Structured Output Parser9",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser9": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Directors1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Directors1": {
+      "main": [
+        [
+          {
+            "node": "Code9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code9": {
+      "main": [
+        [
+          {
+            "node": "SecondJSON SQL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Code12",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FirstJSON": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SecondJSON SQL": {
+      "main": [
+        [
+          {
+            "node": "SecondJSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SecondJSON": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code12": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "normalize_user_input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Title format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Form": {
+      "main": [
+        []
+      ]
+    },
+    "Title format": {
+      "main": [
+        [
+          {
+            "node": "Form",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0cef6373-96a4-426d-8997-f52b9099b735",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d597df0ee8e691017311b79fecc68b3dffa0d67909a25a63fdda2f520856838a"
+  },
+  "id": "BTCFHYkAMpPTX2TP",
+  "tags": []
+}
