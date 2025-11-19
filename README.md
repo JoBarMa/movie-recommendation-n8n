@@ -61,6 +61,9 @@ The flow returns the recommendations directly to the same URL where the user sub
 - Query for creating a table with unique actors from the main table
 - Query for adding SOUNDEX columns to be used in fuzzy matching
 
+3. JSON file with n8n flow (n8n_flow.json):
+- JSON file with n8n code without credentials or webhookID (must be modified in order to work)
+
 **Technologies Used**
 1. n8n – Orchestration and workflow automation
 2. OpenAI GPT-4 – Prompt analysis and feature extraction
