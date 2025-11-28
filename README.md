@@ -2,6 +2,8 @@
 
 > **Use this repo as a template to build your own AI movie recommender.**
 
+**Live demo:** [`https://movie-chat-production.up.railway.app/`](https://movie-chat-production.up.railway.app/)
+
 This project is an AI-powered movie recommender system built using **n8n**, **GPT-4**, **MySQL**, and data sourced from **The Movie Database (TMDB)**.  
 Our setup powers a cinema-style chat UI (frontend) backed by this recommender backend.  
 
